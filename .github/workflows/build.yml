@@ -1,0 +1,29 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build driver
+        run: make build
+
+      - name: Verify bundle
+        run: |
+          test -f MockInput.driver/Contents/MacOS/MockInput
+          nm -gU MockInput.driver/Contents/MacOS/MockInput | grep -q _MockAudio_Create
+          codesign --verify --verbose MockInput.driver
+          lipo -info MockInput.driver/Contents/MacOS/MockInput
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MockInput.driver
+          path: MockInput.driver
