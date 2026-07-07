@@ -2,7 +2,7 @@ class Hush < Formula
   desc "Silent virtual microphone that keeps AirPods in full audio quality"
   homepage "https://github.com/timschmolka/hush"
   url "https://github.com/timschmolka/hush/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "7795a7d9df4d123cdfec7f6195f62c57ba2f116c3250a6a37da5eeba1d5ce2d2"
+  sha256 "d349a92c26297b423ce654c12c3400e5fb55d3228ad308084ec7eec71172a303"
   license "MIT"
   head "https://github.com/timschmolka/hush.git", branch: "main"
 

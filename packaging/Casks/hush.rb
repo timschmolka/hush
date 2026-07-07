@@ -1,15 +1,12 @@
-# Homebrew cask template for distributing the notarized installer package.
+# Homebrew cask for the notarized installer package.
+# Canonical copy lives in the tap at Casks/hush.rb.
+# On a new release, bump `version` and refresh `sha256` (the pkg checksum from
+# the release's SHA256SUMS.txt).
 #
-# Finalize after `make dist` produces a notarized Hush-<version>.pkg and it is
-# attached to the matching GitHub release:
-#   1. Compute the checksum:  shasum -a 256 Hush-1.0.0.pkg
-#   2. Paste it into `sha256` below.
-#   3. Copy this file to the tap repo at Casks/hush.rb and push.
-#
-# Users then install with:  brew install --cask timschmolka/tap/hush
+# Install with:  brew install --cask timschmolka/tap/hush
 cask "hush" do
   version "1.0.0"
-  sha256 "REPLACE_WITH_PKG_SHA256"
+  sha256 "7f0d81831d2a44a646d19d2b6d44858773220e7335043fe5555ae2f93af6d744"
 
   url "https://github.com/timschmolka/hush/releases/download/v#{version}/Hush-#{version}.pkg"
   name "Hush"
