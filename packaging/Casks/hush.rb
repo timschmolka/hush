@@ -13,7 +13,7 @@ cask "hush" do
   desc "Silent virtual microphone that keeps AirPods in full audio quality"
   homepage "https://github.com/timschmolka/hush"
 
-  depends_on macos: ">= :big_sur"
+  depends_on macos: :big_sur
 
   pkg "Hush-#{version}.pkg"
 
