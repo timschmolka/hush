@@ -89,17 +89,59 @@ private func mockFormat() -> AudioStreamBasicDescription {
         mReserved: 0)
 }
 
-@inline(__always)
-private func write<T>(_ value: T, _ outData: UnsafeMutableRawPointer?, _ outSize: UnsafeMutablePointer<UInt32>?) {
-    outData?.storeBytes(of: value, as: T.self)
-    outSize?.pointee = UInt32(MemoryLayout<T>.size)
-}
+// MARK: - PropertyValue
 
-@inline(__always)
-private func writeString(_ s: String, _ outData: UnsafeMutableRawPointer?, _ outSize: UnsafeMutablePointer<UInt32>?) {
-    let ref = Unmanaged.passRetained(s as CFString).toOpaque()
-    outData?.storeBytes(of: ref, as: UnsafeMutableRawPointer.self)
-    outSize?.pointee = UInt32(MemoryLayout<UnsafeMutableRawPointer>.size)
+/// A property's value paired with how it encodes into a CoreAudio buffer.
+///
+/// This is the single source of truth for the property system: size, presence,
+/// and data all derive from `value(for:)` below, so they can never disagree.
+/// The raw-pointer `storeBytes` calls — the only genuinely "unsafe" part of the
+/// property layer — are confined to `write(to:)`.
+private enum PropertyValue {
+    case uint32(UInt32)
+    case objectID(AudioObjectID)
+    case float64(Float64)
+    case string(String)
+    case pair(UInt32, UInt32)
+    case asbd(AudioStreamBasicDescription)
+    case rangedFormat(AudioStreamRangedDescription)
+    case valueRange(AudioValueRange)
+    case channelLayout(AudioChannelLayout)
+    case empty
+
+    var byteSize: UInt32 {
+        switch self {
+        case .uint32, .objectID: UInt32(MemoryLayout<UInt32>.size)
+        case .float64:           UInt32(MemoryLayout<Float64>.size)
+        case .string:            UInt32(MemoryLayout<UnsafeMutableRawPointer>.size) // CFStringRef
+        case .pair:              UInt32(2 * MemoryLayout<UInt32>.size)
+        case .asbd:              UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        case .rangedFormat:      UInt32(MemoryLayout<AudioStreamRangedDescription>.size)
+        case .valueRange:        UInt32(MemoryLayout<AudioValueRange>.size)
+        case .channelLayout:     UInt32(MemoryLayout<AudioChannelLayout>.size)
+        case .empty:             0
+        }
+    }
+
+    /// Encodes into `dst`. Callers only invoke this once they've confirmed the
+    /// destination buffer is large enough, so the CFString retain can't leak.
+    func write(to dst: UnsafeMutableRawPointer) {
+        switch self {
+        case let .uint32(v):        dst.storeBytes(of: v, as: UInt32.self)
+        case let .objectID(v):      dst.storeBytes(of: v, as: AudioObjectID.self)
+        case let .float64(v):       dst.storeBytes(of: v, as: Float64.self)
+        case let .string(s):
+            dst.storeBytes(of: Unmanaged.passRetained(s as CFString).toOpaque(), as: UnsafeMutableRawPointer.self)
+        case let .pair(a, b):
+            dst.storeBytes(of: a, toByteOffset: 0, as: UInt32.self)
+            dst.storeBytes(of: b, toByteOffset: MemoryLayout<UInt32>.size, as: UInt32.self)
+        case let .asbd(v):          dst.storeBytes(of: v, as: AudioStreamBasicDescription.self)
+        case let .rangedFormat(v):  dst.storeBytes(of: v, as: AudioStreamRangedDescription.self)
+        case let .valueRange(v):    dst.storeBytes(of: v, as: AudioValueRange.self)
+        case let .channelLayout(v): dst.storeBytes(of: v, as: AudioChannelLayout.self)
+        case .empty:                break
+        }
+    }
 }
 
 // MARK: - Interface vtable
@@ -192,8 +234,8 @@ private func HushQueryInterface(_ driver: UnsafeMutableRawPointer?,
 // MARK: - Property access
 
 private func HushHasProperty(_ obj: AudioObjectID, _ addr: UnsafePointer<AudioObjectPropertyAddress>?) -> Bool {
-    var size: UInt32 = 0
-    return HushGetPropertyDataSize(obj, addr, &size) == noErr
+    guard let a = addr?.pointee else { return false }
+    return value(for: obj, a.mSelector, scope: a.mScope, qualifier: nil) != nil
 }
 
 private func HushIsSettable(_ obj: AudioObjectID,
@@ -212,66 +254,101 @@ private func HushIsSettable(_ obj: AudioObjectID,
     return noErr
 }
 
+/// The single source of truth for every property Hush exposes. Returns `nil`
+/// for anything unsupported (which maps to `kAudioHardwareUnknownPropertyError`).
+private func value(for object: AudioObjectID,
+                   _ selector: AudioObjectPropertySelector,
+                   scope: AudioObjectPropertyScope,
+                   qualifier: UnsafeRawPointer?) -> PropertyValue? {
+    switch object {
+    case Obj.plugIn:
+        switch selector {
+        case kAudioObjectPropertyBaseClass:    return .uint32(UInt32(kAudioObjectClassID))
+        case kAudioObjectPropertyClass:        return .uint32(UInt32(kAudioPlugInClassID))
+        case kAudioObjectPropertyOwner:        return .objectID(AudioObjectID(kAudioObjectUnknown))
+        case kAudioObjectPropertyManufacturer: return .string(kManufacturer)
+        case kAudioObjectPropertyOwnedObjects,
+             kAudioPlugInPropertyDeviceList:   return .objectID(Obj.device)
+        case kAudioPlugInPropertyTranslateUIDToDevice:
+            let uid = qualifier?.load(as: CFString.self)
+            let match = uid.map { CFEqual($0, kDeviceUID as CFString) } ?? false
+            return .objectID(match ? Obj.device : AudioObjectID(kAudioObjectUnknown))
+        case kAudioPlugInPropertyResourceBundle: return .string("")
+        default: return nil
+        }
+
+    case Obj.device:
+        switch selector {
+        case kAudioObjectPropertyBaseClass:    return .uint32(UInt32(kAudioObjectClassID))
+        case kAudioObjectPropertyClass:        return .uint32(UInt32(kAudioDeviceClassID))
+        case kAudioObjectPropertyOwner:        return .objectID(Obj.plugIn)
+        case kAudioObjectPropertyName:         return .string(kDeviceName)
+        case kAudioObjectPropertyManufacturer: return .string(kManufacturer)
+        case kAudioObjectPropertyOwnedObjects,
+             kAudioDevicePropertyStreams:
+            return scope == kAudioObjectPropertyScopeOutput ? .empty : .objectID(Obj.streamInput)
+        case kAudioDevicePropertyDeviceUID:      return .string(kDeviceUID)
+        case kAudioDevicePropertyModelUID:       return .string(kModelUID)
+        case kAudioDevicePropertyTransportType:  return .uint32(UInt32(kAudioDeviceTransportTypeVirtual))
+        case kAudioDevicePropertyRelatedDevices: return .objectID(Obj.device)
+        case kAudioDevicePropertyClockDomain:    return .uint32(0)
+        case kAudioDevicePropertyDeviceIsAlive:  return .uint32(1)
+        case kAudioDevicePropertyDeviceIsRunning:
+            lock(); let running = gIOCount > 0; unlock()
+            return .uint32(running ? 1 : 0)
+        case kAudioDevicePropertyDeviceCanBeDefaultDevice,
+             kAudioDevicePropertyDeviceCanBeDefaultSystemDevice: return .uint32(1)
+        case kAudioDevicePropertyLatency,
+             kAudioDevicePropertySafetyOffset,
+             kAudioDevicePropertyIsHidden:       return .uint32(0)
+        case kAudioObjectPropertyControlList:    return .empty
+        case kAudioDevicePropertyNominalSampleRate: return .float64(kSampleRate)
+        case kAudioDevicePropertyAvailableNominalSampleRates:
+            return .valueRange(AudioValueRange(mMinimum: kSampleRate, mMaximum: kSampleRate))
+        case kAudioDevicePropertyPreferredChannelsForStereo: return .pair(1, 2)
+        case kAudioDevicePropertyPreferredChannelLayout:
+            var layout = AudioChannelLayout()
+            layout.mChannelLayoutTag = kAudioChannelLayoutTag_Stereo
+            return .channelLayout(layout)
+        case kAudioDevicePropertyZeroTimeStampPeriod: return .uint32(kRingBufferSize)
+        default: return nil
+        }
+
+    case Obj.streamInput:
+        switch selector {
+        case kAudioObjectPropertyBaseClass:      return .uint32(UInt32(kAudioObjectClassID))
+        case kAudioObjectPropertyClass:          return .uint32(UInt32(kAudioStreamClassID))
+        case kAudioObjectPropertyOwner:          return .objectID(Obj.device)
+        case kAudioObjectPropertyOwnedObjects:   return .empty
+        case kAudioStreamPropertyIsActive:       return .uint32(1)
+        case kAudioStreamPropertyDirection:      return .uint32(1) // 1 = input
+        case kAudioStreamPropertyTerminalType:   return .uint32(UInt32(kAudioStreamTerminalTypeMicrophone))
+        case kAudioStreamPropertyStartingChannel: return .uint32(1)
+        case kAudioStreamPropertyLatency:        return .uint32(0)
+        case kAudioStreamPropertyVirtualFormat,
+             kAudioStreamPropertyPhysicalFormat: return .asbd(mockFormat())
+        case kAudioStreamPropertyAvailableVirtualFormats,
+             kAudioStreamPropertyAvailablePhysicalFormats:
+            return .rangedFormat(AudioStreamRangedDescription(
+                mFormat: mockFormat(),
+                mSampleRateRange: AudioValueRange(mMinimum: kSampleRate, mMaximum: kSampleRate)))
+        default: return nil
+        }
+
+    default:
+        return nil
+    }
+}
+
 private func HushGetPropertyDataSize(_ obj: AudioObjectID,
                                      _ addr: UnsafePointer<AudioObjectPropertyAddress>?,
                                      _ outSize: UnsafeMutablePointer<UInt32>?) -> OSStatus {
     guard let a = addr?.pointee else { return kAudioHardwareBadObjectError }
-    let sel = a.mSelector
-    let ptr = UInt32(MemoryLayout<UnsafeMutableRawPointer>.size)
-
-    func set(_ v: UInt32) -> OSStatus { outSize?.pointee = v; return noErr }
-
-    switch obj {
-    case Obj.plugIn:
-        switch sel {
-        case kAudioObjectPropertyBaseClass, kAudioObjectPropertyClass: return set(UInt32(MemoryLayout<AudioClassID>.size))
-        case kAudioObjectPropertyOwner, kAudioObjectPropertyOwnedObjects,
-             kAudioPlugInPropertyDeviceList, kAudioPlugInPropertyTranslateUIDToDevice:
-            return set(UInt32(MemoryLayout<AudioObjectID>.size))
-        case kAudioObjectPropertyManufacturer, kAudioPlugInPropertyResourceBundle: return set(ptr)
-        default: break
-        }
-    case Obj.device:
-        switch sel {
-        case kAudioObjectPropertyBaseClass, kAudioObjectPropertyClass: return set(UInt32(MemoryLayout<AudioClassID>.size))
-        case kAudioObjectPropertyOwner, kAudioObjectPropertyOwnedObjects,
-             kAudioDevicePropertyStreams, kAudioDevicePropertyRelatedDevices:
-            if sel == kAudioDevicePropertyStreams || sel == kAudioObjectPropertyOwnedObjects,
-               a.mScope == kAudioObjectPropertyScopeOutput { return set(0) }
-            return set(UInt32(MemoryLayout<AudioObjectID>.size))
-        case kAudioObjectPropertyName, kAudioObjectPropertyManufacturer,
-             kAudioDevicePropertyDeviceUID, kAudioDevicePropertyModelUID: return set(ptr)
-        case kAudioDevicePropertyTransportType, kAudioDevicePropertyClockDomain,
-             kAudioDevicePropertyDeviceIsAlive, kAudioDevicePropertyDeviceIsRunning,
-             kAudioDevicePropertyDeviceCanBeDefaultDevice, kAudioDevicePropertyDeviceCanBeDefaultSystemDevice,
-             kAudioDevicePropertyLatency, kAudioDevicePropertySafetyOffset,
-             kAudioDevicePropertyIsHidden, kAudioDevicePropertyZeroTimeStampPeriod:
-            return set(UInt32(MemoryLayout<UInt32>.size))
-        case kAudioObjectPropertyControlList: return set(0)
-        case kAudioDevicePropertyNominalSampleRate: return set(UInt32(MemoryLayout<Float64>.size))
-        case kAudioDevicePropertyAvailableNominalSampleRates: return set(UInt32(MemoryLayout<AudioValueRange>.size))
-        case kAudioDevicePropertyPreferredChannelsForStereo: return set(UInt32(2 * MemoryLayout<UInt32>.size))
-        case kAudioDevicePropertyPreferredChannelLayout: return set(UInt32(MemoryLayout<AudioChannelLayout>.size))
-        default: break
-        }
-    case Obj.streamInput:
-        switch sel {
-        case kAudioObjectPropertyBaseClass, kAudioObjectPropertyClass: return set(UInt32(MemoryLayout<AudioClassID>.size))
-        case kAudioObjectPropertyOwner: return set(UInt32(MemoryLayout<AudioObjectID>.size))
-        case kAudioObjectPropertyOwnedObjects: return set(0)
-        case kAudioStreamPropertyIsActive, kAudioStreamPropertyDirection,
-             kAudioStreamPropertyTerminalType, kAudioStreamPropertyStartingChannel,
-             kAudioStreamPropertyLatency:
-            return set(UInt32(MemoryLayout<UInt32>.size))
-        case kAudioStreamPropertyVirtualFormat, kAudioStreamPropertyPhysicalFormat:
-            return set(UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
-        case kAudioStreamPropertyAvailableVirtualFormats, kAudioStreamPropertyAvailablePhysicalFormats:
-            return set(UInt32(MemoryLayout<AudioStreamRangedDescription>.size))
-        default: break
-        }
-    default: break
+    guard let v = value(for: obj, a.mSelector, scope: a.mScope, qualifier: nil) else {
+        return kAudioHardwareUnknownPropertyError
     }
-    return kAudioHardwareUnknownPropertyError
+    outSize?.pointee = v.byteSize
+    return noErr
 }
 
 private func HushGetPropertyData(_ obj: AudioObjectID,
@@ -281,90 +358,18 @@ private func HushGetPropertyData(_ obj: AudioObjectID,
                                  _ outSize: UnsafeMutablePointer<UInt32>?,
                                  _ outData: UnsafeMutableRawPointer?) -> OSStatus {
     guard let a = addr?.pointee else { return kAudioHardwareBadObjectError }
-    let sel = a.mSelector
-
-    switch obj {
-    case Obj.plugIn:
-        switch sel {
-        case kAudioObjectPropertyBaseClass: write(AudioClassID(kAudioObjectClassID), outData, outSize); return noErr
-        case kAudioObjectPropertyClass: write(AudioClassID(kAudioPlugInClassID), outData, outSize); return noErr
-        case kAudioObjectPropertyOwner: write(AudioObjectID(kAudioObjectUnknown), outData, outSize); return noErr
-        case kAudioObjectPropertyManufacturer: writeString(kManufacturer, outData, outSize); return noErr
-        case kAudioObjectPropertyOwnedObjects, kAudioPlugInPropertyDeviceList:
-            if inDataSize >= UInt32(MemoryLayout<AudioObjectID>.size) { write(Obj.device, outData, outSize) }
-            else { outSize?.pointee = 0 }
-            return noErr
-        case kAudioPlugInPropertyTranslateUIDToDevice:
-            let uid = qualData?.load(as: CFString.self)
-            let match = (uid != nil) && CFEqual(uid!, kDeviceUID as CFString)
-            write(match ? Obj.device : AudioObjectID(kAudioObjectUnknown), outData, outSize)
-            return noErr
-        case kAudioPlugInPropertyResourceBundle: writeString("", outData, outSize); return noErr
-        default: break
-        }
-    case Obj.device:
-        switch sel {
-        case kAudioObjectPropertyBaseClass: write(AudioClassID(kAudioObjectClassID), outData, outSize); return noErr
-        case kAudioObjectPropertyClass: write(AudioClassID(kAudioDeviceClassID), outData, outSize); return noErr
-        case kAudioObjectPropertyOwner: write(Obj.plugIn, outData, outSize); return noErr
-        case kAudioObjectPropertyName: writeString(kDeviceName, outData, outSize); return noErr
-        case kAudioObjectPropertyManufacturer: writeString(kManufacturer, outData, outSize); return noErr
-        case kAudioObjectPropertyOwnedObjects, kAudioDevicePropertyStreams:
-            if a.mScope == kAudioObjectPropertyScopeOutput { outSize?.pointee = 0; return noErr }
-            if inDataSize >= UInt32(MemoryLayout<AudioObjectID>.size) { write(Obj.streamInput, outData, outSize) }
-            else { outSize?.pointee = 0 }
-            return noErr
-        case kAudioDevicePropertyDeviceUID: writeString(kDeviceUID, outData, outSize); return noErr
-        case kAudioDevicePropertyModelUID: writeString(kModelUID, outData, outSize); return noErr
-        case kAudioDevicePropertyTransportType: write(UInt32(kAudioDeviceTransportTypeVirtual), outData, outSize); return noErr
-        case kAudioDevicePropertyRelatedDevices: write(Obj.device, outData, outSize); return noErr
-        case kAudioDevicePropertyClockDomain: write(UInt32(0), outData, outSize); return noErr
-        case kAudioDevicePropertyDeviceIsAlive: write(UInt32(1), outData, outSize); return noErr
-        case kAudioDevicePropertyDeviceIsRunning:
-            lock(); let running: UInt32 = gIOCount > 0 ? 1 : 0; unlock()
-            write(running, outData, outSize); return noErr
-        case kAudioDevicePropertyDeviceCanBeDefaultDevice, kAudioDevicePropertyDeviceCanBeDefaultSystemDevice:
-            write(UInt32(1), outData, outSize); return noErr
-        case kAudioDevicePropertyLatency, kAudioDevicePropertySafetyOffset, kAudioDevicePropertyIsHidden:
-            write(UInt32(0), outData, outSize); return noErr
-        case kAudioObjectPropertyControlList: outSize?.pointee = 0; return noErr
-        case kAudioDevicePropertyNominalSampleRate: write(kSampleRate, outData, outSize); return noErr
-        case kAudioDevicePropertyAvailableNominalSampleRates:
-            write(AudioValueRange(mMinimum: kSampleRate, mMaximum: kSampleRate), outData, outSize); return noErr
-        case kAudioDevicePropertyPreferredChannelsForStereo:
-            outData?.storeBytes(of: UInt32(1), toByteOffset: 0, as: UInt32.self)
-            outData?.storeBytes(of: UInt32(2), toByteOffset: MemoryLayout<UInt32>.size, as: UInt32.self)
-            outSize?.pointee = UInt32(2 * MemoryLayout<UInt32>.size); return noErr
-        case kAudioDevicePropertyPreferredChannelLayout:
-            var layout = AudioChannelLayout()
-            layout.mChannelLayoutTag = kAudioChannelLayoutTag_Stereo
-            write(layout, outData, outSize); return noErr
-        case kAudioDevicePropertyZeroTimeStampPeriod: write(kRingBufferSize, outData, outSize); return noErr
-        default: break
-        }
-    case Obj.streamInput:
-        switch sel {
-        case kAudioObjectPropertyBaseClass: write(AudioClassID(kAudioObjectClassID), outData, outSize); return noErr
-        case kAudioObjectPropertyClass: write(AudioClassID(kAudioStreamClassID), outData, outSize); return noErr
-        case kAudioObjectPropertyOwner: write(Obj.device, outData, outSize); return noErr
-        case kAudioObjectPropertyOwnedObjects: outSize?.pointee = 0; return noErr
-        case kAudioStreamPropertyIsActive: write(UInt32(1), outData, outSize); return noErr
-        case kAudioStreamPropertyDirection: write(UInt32(1), outData, outSize); return noErr // 1 = input
-        case kAudioStreamPropertyTerminalType: write(UInt32(kAudioStreamTerminalTypeMicrophone), outData, outSize); return noErr
-        case kAudioStreamPropertyStartingChannel: write(UInt32(1), outData, outSize); return noErr
-        case kAudioStreamPropertyLatency: write(UInt32(0), outData, outSize); return noErr
-        case kAudioStreamPropertyVirtualFormat, kAudioStreamPropertyPhysicalFormat:
-            write(mockFormat(), outData, outSize); return noErr
-        case kAudioStreamPropertyAvailableVirtualFormats, kAudioStreamPropertyAvailablePhysicalFormats:
-            let ranged = AudioStreamRangedDescription(
-                mFormat: mockFormat(),
-                mSampleRateRange: AudioValueRange(mMinimum: kSampleRate, mMaximum: kSampleRate))
-            write(ranged, outData, outSize); return noErr
-        default: break
-        }
-    default: break
+    guard let v = value(for: obj, a.mSelector, scope: a.mScope, qualifier: qualData) else {
+        return kAudioHardwareUnknownPropertyError
     }
-    return kAudioHardwareUnknownPropertyError
+    // Write only when the client's buffer can hold the whole value (all values
+    // Hush exposes are scalar or single-element, so it's all-or-nothing).
+    if let outData, inDataSize >= v.byteSize {
+        v.write(to: outData)
+        outSize?.pointee = v.byteSize
+    } else {
+        outSize?.pointee = 0
+    }
+    return noErr
 }
 
 private func HushSetPropertyData(_ obj: AudioObjectID,
