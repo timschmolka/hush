@@ -1,5 +1,6 @@
 # Build output
-MockInput.driver/
+Hush.driver/
+build/
 *.o
 
 # macOS

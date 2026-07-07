@@ -5,11 +5,11 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>English</string>
     <key>CFBundleExecutable</key>
-    <string>MockInput</string>
+    <string>Hush</string>
     <key>CFBundleIdentifier</key>
-    <string>com.poc.mockinput</string>
+    <string>com.timschmolka.hush</string>
     <key>CFBundleName</key>
-    <string>MockInput</string>
+    <string>Hush</string>
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleShortVersionString</key>
@@ -19,7 +19,7 @@
     <key>CFPlugInFactories</key>
     <dict>
         <key>9E7B4F2A-1C3D-4E5F-8A9B-0C1D2E3F4A5B</key>
-        <string>MockAudio_Create</string>
+        <string>HushCreate</string>
     </dict>
     <key>CFPlugInTypes</key>
     <dict>
