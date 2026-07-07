@@ -1,13 +1,10 @@
 class Hush < Formula
   desc "Silent virtual microphone that keeps AirPods in full audio quality"
   homepage "https://github.com/timschmolka/hush"
+  url "https://github.com/timschmolka/hush/archive/refs/tags/v1.0.0.tar.gz"
+  sha256 "7795a7d9df4d123cdfec7f6195f62c57ba2f116c3250a6a37da5eeba1d5ce2d2"
   license "MIT"
   head "https://github.com/timschmolka/hush.git", branch: "main"
-
-  # After cutting a tagged release, point these at the tarball:
-  # url "https://github.com/timschmolka/hush/archive/refs/tags/v1.0.0.tar.gz"
-  # sha256 "REPLACE_WITH_TARBALL_SHA256"
-  # version "1.0.0"
 
   depends_on :macos
   depends_on xcode: :build
