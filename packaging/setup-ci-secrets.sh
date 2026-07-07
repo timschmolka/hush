@@ -8,16 +8,16 @@
 #   - `gh` authenticated with admin on the repo (gh auth status)
 #   - Two exported Developer ID certs as .p12 (Keychain Access > right-click the
 #     identity > Export…), both protected with the SAME password.
-#   - An app-specific password for notarization, created at appleid.apple.com
-#     (Sign-In & Security > App-Specific Passwords).
+#   - An App Store Connect API key: the AuthKey_XXXX.p8 plus its Key ID and
+#     Issuer ID (App Store Connect > Users and Access > Integrations).
 #
 # Usage (all values via env):
 #   APP_P12=DeveloperID_Application.p12 \
 #   INSTALLER_P12=DeveloperID_Installer.p12 \
 #   P12_PASSWORD='the-export-password' \
-#   NOTARY_APPLE_ID='you@example.com' \
-#   NOTARY_PASSWORD='abcd-efgh-ijkl-mnop' \
-#   NOTARY_TEAM_ID=GCWU97Q534 \
+#   API_KEY_P8=AuthKey_494J62TB47.p8 \
+#   API_KEY_ID=494J62TB47 \
+#   API_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
 #   ./packaging/setup-ci-secrets.sh
 set -euo pipefail
 
@@ -29,10 +29,10 @@ need_val()  { [[ -n "${!1:-}" ]] || die "\$$1 must be set"; }
 
 need_file APP_P12
 need_file INSTALLER_P12
+need_file API_KEY_P8
 need_val  P12_PASSWORD
-need_val  NOTARY_APPLE_ID
-need_val  NOTARY_PASSWORD
-need_val  NOTARY_TEAM_ID
+need_val  API_KEY_ID
+need_val  API_ISSUER_ID
 
 command -v gh >/dev/null || die "gh not found"
 gh auth status >/dev/null 2>&1 || die "gh is not authenticated (run: gh auth login)"
@@ -46,9 +46,9 @@ echo "Setting secrets:"
 set_secret_b64 DEVELOPER_ID_APP_CERT_P12_BASE64       "$APP_P12"
 set_secret_b64 DEVELOPER_ID_INSTALLER_CERT_P12_BASE64 "$INSTALLER_P12"
 set_secret     CERT_P12_PASSWORD                      "$P12_PASSWORD"
-set_secret     NOTARY_APPLE_ID                        "$NOTARY_APPLE_ID"
-set_secret     NOTARY_PASSWORD                        "$NOTARY_PASSWORD"
-set_secret     NOTARY_TEAM_ID                         "$NOTARY_TEAM_ID"
+set_secret_b64 NOTARY_API_KEY_P8_BASE64               "$API_KEY_P8"
+set_secret     NOTARY_API_KEY_ID                      "$API_KEY_ID"
+set_secret     NOTARY_API_ISSUER_ID                   "$API_ISSUER_ID"
 
 # Random unlock password for the disposable CI keychain (only overwrite if unset).
 if ! gh secret list -R "$REPO" | grep -q '^KEYCHAIN_PASSWORD'; then
