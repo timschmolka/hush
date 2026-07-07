@@ -52,10 +52,15 @@ jobs:
         run: |
           make dist NOTARY_ARGS="--key $RUNNER_TEMP/notary.p8 --key-id $NOTARY_KEY_ID --issuer $NOTARY_ISSUER"
 
-      - name: Verify the notarized package
+      - name: Verify the notarized package and write release notes
         run: |
+          set -euo pipefail
           spctl -a -vvv -t install Hush-*.pkg
-          shasum -a 256 Hush-*.pkg | tee SHA256SUMS.txt
+          PKG=$(ls Hush-*.pkg)
+          shasum -a 256 "$PKG" > SHA256SUMS.txt
+          SHA=$(awk '{print $1}' SHA256SUMS.txt)
+          sed -e "s|__PKG__|$PKG|g" -e "s|__SHA__|$SHA|g" \
+            packaging/release-notes.md.tmpl > RELEASE_NOTES.md
 
       # Only publish on a real version tag. A manual workflow_dispatch run does
       # everything above (a full sign + notarize dry run) but skips this.
@@ -66,7 +71,7 @@ jobs:
           files: |
             Hush-*.pkg
             SHA256SUMS.txt
-          body_path: SHA256SUMS.txt
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

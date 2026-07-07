@@ -1,0 +1,26 @@
+A silent virtual microphone for macOS that keeps your AirPods in full audio quality.
+
+## Install
+
+```bash
+brew install --cask timschmolka/tap/hush
+```
+
+Prefer building from source? `brew install --formula timschmolka/tap/hush`.
+Then choose **Hush** in System Settings → Sound → Input.
+
+## Verify the download
+
+This installer is signed with a Developer ID and notarized by Apple, so Gatekeeper
+accepts it without warnings:
+
+```
+spctl -a -vvv -t install __PKG__
+# → accepted / source=Notarized Developer ID
+```
+
+SHA-256 (also in `SHA256SUMS.txt`):
+
+```
+__SHA__  __PKG__
+```
