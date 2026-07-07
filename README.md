@@ -3,6 +3,7 @@
 **A silent virtual microphone for macOS that keeps your AirPods in full audio quality.**
 
 [![Build](https://github.com/timschmolka/hush/actions/workflows/build.yml/badge.svg)](https://github.com/timschmolka/hush/actions/workflows/build.yml)
+[![Release](https://github.com/timschmolka/hush/actions/workflows/release.yml/badge.svg)](https://github.com/timschmolka/hush/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/macOS-11%2B-blue)
 ![Language](https://img.shields.io/badge/Swift-6-orange)
@@ -108,40 +109,55 @@ src/Hush.swift        The entire driver (~430 lines, single file)
 Info.plist            Plug-in factory registration
 Makefile              build / install / uninstall / clean / dist
 Formula/hush.rb       Homebrew formula (builds from source)
-packaging/            Installer scripts + cask template for signed releases
+packaging/            postinstall script, Homebrew cask, CI secret helper,
+                      and the release-notes template
+.github/workflows/    build (CI) and release (sign + notarize + publish)
 ```
 
 ## Releasing (maintainer)
 
-The `dist` target produces a Developer ID–signed, notarized installer package
-that end users can run without Gatekeeper friction:
+Releases are automated. Pushing a version tag triggers the
+[Release workflow](.github/workflows/release.yml), which signs, notarizes, and
+publishes the installer:
 
 ```bash
-make dist
+git tag v1.0.1 && git push origin v1.0.1
 ```
 
-This chains three steps, each runnable on its own:
+The workflow rebuilds a disposable keychain from the Developer ID certificates,
+runs `make dist` (sign → package → notarize → staple), verifies the result with
+`spctl`, and creates a GitHub release with the notarized `Hush-<version>.pkg`,
+its `SHA256SUMS.txt`, and generated release notes. A manual
+`workflow_dispatch` run does everything except publish — a full sign + notarize
+dry run.
 
-- `make sign-release` — signs `Hush.driver` with a Developer ID Application
-  identity, hardened runtime, and a secure timestamp.
-- `make pkg` — builds `Hush-<version>.pkg` (installs to the HAL dir, restarts
-  `coreaudiod` via a postinstall script) and signs it with a Developer ID
-  Installer identity.
-- `make notarize` — submits the pkg to Apple's notary service and staples the
-  ticket.
+Per-release manual steps:
 
-Prerequisites (override the identity names via make variables if they differ):
+1. Bump `VERSION` in the `Makefile`.
+2. After the release publishes, bump `version` and refresh `sha256` (the pkg
+   checksum from the release's `SHA256SUMS.txt`) in the tap's `Casks/hush.rb`,
+   and update `url`/`sha256` in `Formula/hush.rb` for the new source tarball.
 
-- **Developer ID Application** and **Developer ID Installer** certificates in
-  the login keychain.
-- A stored notarytool credential profile named `notarytool-profile`:
-  ```bash
-  xcrun notarytool store-credentials notarytool-profile \
-    --apple-id you@example.com --team-id GCWU97Q534 --password <app-specific-password>
-  ```
+### One-time CI setup
 
-Attach the resulting `.pkg` to the GitHub release, then finalize
-`packaging/Casks/hush.rb` with its checksum for `brew install --cask`.
+The workflow needs Developer ID certificates and an App Store Connect API key
+for notarization, stored as repo secrets. `packaging/setup-ci-secrets.sh`
+pushes them via `gh` (see its header for the exact export commands):
+
+```bash
+CERTS_P12=certs.p12 P12_PASSWORD='…' \
+API_KEY_P8=AuthKey_XXXXXXXXXX.p8 API_KEY_ID=XXXXXXXXXX \
+API_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
+./packaging/setup-ci-secrets.sh
+```
+
+### Building the installer locally
+
+`make dist` produces the same Developer ID–signed, notarized package. It chains
+`make sign-release` (hardened runtime + secure timestamp), `make pkg` (signed
+`Hush-<version>.pkg`), and `make notarize` (submit + staple). This needs both
+Developer ID certificates in the login keychain and notary credentials passed
+via `NOTARY_ARGS` (a stored `notarytool` profile or an API key).
 
 ## Prior art
 
