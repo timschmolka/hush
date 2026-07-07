@@ -4,6 +4,14 @@ build/
 *.o
 *.pkg
 
+# Secrets — never commit signing/notarization material
+*.p8
+*.p12
+*.cer
+*.pem
+*.key
+*.mobileprovision
+
 # macOS
 .DS_Store
 

@@ -15,8 +15,8 @@
 #   APP_P12=DeveloperID_Application.p12 \
 #   INSTALLER_P12=DeveloperID_Installer.p12 \
 #   P12_PASSWORD='the-export-password' \
-#   API_KEY_P8=AuthKey_494J62TB47.p8 \
-#   API_KEY_ID=494J62TB47 \
+#   API_KEY_P8=AuthKey_XXXXXXXXXX.p8 \
+#   API_KEY_ID=XXXXXXXXXX \
 #   API_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
 #   ./packaging/setup-ci-secrets.sh
 set -euo pipefail
