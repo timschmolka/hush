@@ -24,6 +24,10 @@ DEV_ID_INSTALLER ?= Developer ID Installer: Tim Schmolka (GCWU97Q534)
 # credential (create with: xcrun notarytool store-credentials notarytool-profile
 #   --apple-id <id> --team-id GCWU97Q534 --password <app-specific-pw>).
 NOTARY_PROFILE   ?= notarytool-profile
+# How notarytool authenticates. Locally this uses the keychain profile; CI
+# overrides it with App Store Connect API-key args, e.g.
+#   make notarize NOTARY_ARGS="--key key.p8 --key-id ABC123 --issuer <uuid>"
+NOTARY_ARGS      ?= --keychain-profile "$(NOTARY_PROFILE)"
 
 .PHONY: all build sign sign-release pkg notarize dist clean install uninstall reload
 
@@ -75,7 +79,7 @@ pkg: sign-release
 # Submit the package to Apple's notary service and staple the ticket so the
 # result verifies offline. Requires a stored notarytool credential profile.
 notarize: pkg
-	xcrun notarytool submit $(PKG) --keychain-profile "$(NOTARY_PROFILE)" --wait
+	xcrun notarytool submit $(PKG) $(NOTARY_ARGS) --wait
 	xcrun stapler staple $(PKG)
 	xcrun stapler validate $(PKG)
 	@echo "Notarized and stapled: $(PKG)"
