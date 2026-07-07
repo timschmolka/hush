@@ -2,6 +2,7 @@
 Hush.driver/
 build/
 *.o
+*.pkg
 
 # macOS
 .DS_Store

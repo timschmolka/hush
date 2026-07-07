@@ -86,11 +86,44 @@ make build CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
 ## Project layout
 
 ```
-src/Hush.swift    The entire driver (~430 lines, single file)
-Info.plist        Plug-in factory registration
-Makefile          build / install / uninstall / clean
-Formula/hush.rb   Homebrew formula
+src/Hush.swift        The entire driver (~430 lines, single file)
+Info.plist            Plug-in factory registration
+Makefile              build / install / uninstall / clean / dist
+Formula/hush.rb       Homebrew formula (builds from source)
+packaging/            Installer scripts + cask template for signed releases
 ```
+
+## Releasing (maintainer)
+
+The `dist` target produces a Developer ID–signed, notarized installer package
+that end users can run without Gatekeeper friction:
+
+```bash
+make dist
+```
+
+This chains three steps, each runnable on its own:
+
+- `make sign-release` — signs `Hush.driver` with a Developer ID Application
+  identity, hardened runtime, and a secure timestamp.
+- `make pkg` — builds `Hush-<version>.pkg` (installs to the HAL dir, restarts
+  `coreaudiod` via a postinstall script) and signs it with a Developer ID
+  Installer identity.
+- `make notarize` — submits the pkg to Apple's notary service and staples the
+  ticket.
+
+Prerequisites (override the identity names via make variables if they differ):
+
+- **Developer ID Application** and **Developer ID Installer** certificates in
+  the login keychain.
+- A stored notarytool credential profile:
+  ```bash
+  xcrun notarytool store-credentials hush-notary \
+    --apple-id you@example.com --team-id GCWU97Q534 --password <app-specific-password>
+  ```
+
+Attach the resulting `.pkg` to the GitHub release, then finalize
+`packaging/Casks/hush.rb` with its checksum for `brew install --cask`.
 
 ## Prior art
 

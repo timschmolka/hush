@@ -12,7 +12,19 @@ SWIFTFLAGS := -O -parse-as-library -emit-library -Xlinker -bundle \
               -framework CoreAudio -framework CoreFoundation
 BUILD      := build
 
-.PHONY: all build sign clean install uninstall reload
+# --- Distribution (Developer ID signing + notarization) ---------------------
+# Override on the command line as needed, e.g.
+#   make dist DEV_ID_INSTALLER="Developer ID Installer: Tim Schmolka (GCWU97Q534)"
+VERSION          := 1.0.0
+PKG_ID           := com.timschmolka.hush
+PKG              := Hush-$(VERSION).pkg
+DEV_ID_APP       ?= Developer ID Application: Tim Schmolka (GCWU97Q534)
+DEV_ID_INSTALLER ?= Developer ID Installer: Tim Schmolka (GCWU97Q534)
+# Name of a notarytool keychain profile created via:
+#   xcrun notarytool store-credentials hush-notary --apple-id <id> --team-id GCWU97Q534 --password <app-specific-pw>
+NOTARY_PROFILE   ?= hush-notary
+
+.PHONY: all build sign sign-release pkg notarize dist clean install uninstall reload
 
 all: build
 
@@ -32,6 +44,43 @@ $(BUNDLE): $(SRC) Info.plist
 	codesign --force --sign "$(CODESIGN_IDENTITY)" $(BUNDLE)
 	rm -rf $(BUILD)
 	@echo "Built $(BUNDLE)"
+
+# --- Distribution targets ----------------------------------------------------
+
+# Re-sign the built bundle with a Developer ID Application identity, hardened
+# runtime, and a secure timestamp — the prerequisites for notarization.
+sign-release: build
+	codesign --force --options runtime --timestamp \
+		--sign "$(DEV_ID_APP)" $(BUNDLE)
+	codesign --verify --strict --verbose=2 $(BUNDLE)
+	@echo "Signed $(BUNDLE) with Developer ID (hardened runtime)."
+
+# Build a signed installer package that drops the driver into the system HAL
+# directory and restarts coreaudiod. Requires a Developer ID Installer cert.
+pkg: sign-release
+	rm -rf $(BUILD)/pkgroot $(PKG)
+	mkdir -p $(BUILD)/pkgroot
+	cp -R $(BUNDLE) $(BUILD)/pkgroot/
+	pkgbuild --root $(BUILD)/pkgroot \
+		--identifier $(PKG_ID) \
+		--version $(VERSION) \
+		--install-location "$(HAL_DIR)" \
+		--scripts packaging/scripts \
+		--sign "$(DEV_ID_INSTALLER)" \
+		$(PKG)
+	rm -rf $(BUILD)/pkgroot
+	@echo "Built signed installer: $(PKG)"
+
+# Submit the package to Apple's notary service and staple the ticket so the
+# result verifies offline. Requires a stored notarytool credential profile.
+notarize: pkg
+	xcrun notarytool submit $(PKG) --keychain-profile "$(NOTARY_PROFILE)" --wait
+	xcrun stapler staple $(PKG)
+	xcrun stapler validate $(PKG)
+	@echo "Notarized and stapled: $(PKG)"
+
+# Full distribution pipeline: signed, packaged, notarized, stapled.
+dist: notarize
 
 # Install into the system HAL directory and restart the audio daemon.
 install: build

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Restart the CoreAudio daemon so it picks up the freshly installed HAL plug-in.
+# Runs as root during package install; ownership is already root:wheel.
+killall coreaudiod 2>/dev/null || true
+exit 0
