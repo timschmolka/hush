@@ -39,18 +39,16 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed s/\"//g)
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
 
-      - name: Write notary API key
-        env:
-          NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_API_KEY_P8_BASE64 }}
-        run: echo "$NOTARY_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/notary.p8"
-
-      # sign-release + pkg + notarize + staple, authenticating via the API key.
+      # sign-release + pkg + notarize + staple, authenticating with an
+      # Apple ID + app-specific password (same credential type as the local
+      # notarytool-profile).
       - name: Build, sign, package, and notarize
         env:
-          NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
-          NOTARY_ISSUER: ${{ secrets.NOTARY_API_ISSUER_ID }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_TEAM_ID:  ${{ secrets.NOTARY_TEAM_ID }}
         run: |
-          make dist NOTARY_ARGS="--key $RUNNER_TEMP/notary.p8 --key-id $NOTARY_KEY_ID --issuer $NOTARY_ISSUER"
+          make dist NOTARY_ARGS="--apple-id $NOTARY_APPLE_ID --password $NOTARY_PASSWORD --team-id $NOTARY_TEAM_ID"
 
       - name: Verify the notarized package
         run: |
@@ -67,7 +65,3 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Clean up notary key
-        if: always()
-        run: rm -f "$RUNNER_TEMP/notary.p8"
