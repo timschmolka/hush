@@ -26,15 +26,25 @@ Hush is a [CoreAudio Audio Server Plug-In](https://developer.apple.com/documenta
 
 ## Install
 
-### Homebrew
+Pick whichever you prefer — a signed, notarized installer (nothing to build), or a build from source.
+
+### Homebrew — prebuilt installer (recommended)
 
 ```bash
-brew install timschmolka/tap/hush
+brew install --cask timschmolka/tap/hush
 ```
 
-Homebrew builds and stages the driver, then prints the two `sudo` commands to activate it (a CoreAudio driver has to live in a system directory, which needs admin rights).
+Downloads the notarized `.pkg`, which installs the driver and restarts `coreaudiod` for you. Homebrew verifies the download's SHA-256 automatically, so a tampered file is rejected before it runs.
 
-### From source
+### Homebrew — build from source
+
+```bash
+brew install --formula timschmolka/tap/hush
+```
+
+Builds and stages the driver locally (needs the Xcode command-line tools), then prints the two `sudo` commands to activate it.
+
+### From source, manually
 
 ```bash
 git clone https://github.com/timschmolka/hush.git
@@ -45,6 +55,14 @@ make install     # builds, code-signs (ad-hoc), copies to the HAL dir, restarts 
 Then open **System Settings → Sound → Input** and choose **Hush**.
 
 That's it — your AirPods now stay in full quality. All system audio drops for a second while `coreaudiod` restarts; that's expected.
+
+### Verifying a download
+
+Every release ships a signed, notarized `.pkg` (verify with `spctl -a -vvv -t install Hush-1.0.0.pkg` — it should report *accepted / Notarized Developer ID*). The release notes also list the SHA-256 of each artifact so you can confirm it byte-for-byte:
+
+```bash
+shasum -a 256 Hush-1.0.0.pkg   # compare against the checksum in the release notes
+```
 
 ## Uninstall
 
@@ -116,9 +134,9 @@ Prerequisites (override the identity names via make variables if they differ):
 
 - **Developer ID Application** and **Developer ID Installer** certificates in
   the login keychain.
-- A stored notarytool credential profile:
+- A stored notarytool credential profile named `notarytool-profile`:
   ```bash
-  xcrun notarytool store-credentials hush-notary \
+  xcrun notarytool store-credentials notarytool-profile \
     --apple-id you@example.com --team-id GCWU97Q534 --password <app-specific-password>
   ```
 

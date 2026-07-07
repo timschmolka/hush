@@ -20,9 +20,10 @@ PKG_ID           := com.timschmolka.hush
 PKG              := Hush-$(VERSION).pkg
 DEV_ID_APP       ?= Developer ID Application: Tim Schmolka (GCWU97Q534)
 DEV_ID_INSTALLER ?= Developer ID Installer: Tim Schmolka (GCWU97Q534)
-# Name of a notarytool keychain profile created via:
-#   xcrun notarytool store-credentials hush-notary --apple-id <id> --team-id GCWU97Q534 --password <app-specific-pw>
-NOTARY_PROFILE   ?= hush-notary
+# Name of a notarytool keychain profile. Reuses the existing account-wide
+# credential (create with: xcrun notarytool store-credentials notarytool-profile
+#   --apple-id <id> --team-id GCWU97Q534 --password <app-specific-pw>).
+NOTARY_PROFILE   ?= notarytool-profile
 
 .PHONY: all build sign sign-release pkg notarize dist clean install uninstall reload
 
